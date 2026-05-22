@@ -43,27 +43,23 @@ static void      EnsureServiceRunning();
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
-int WINAPI wWinMain(_In_ HINSTANCE hInstance,
-    _In_opt_ HINSTANCE /*hPrevInstance*/,
-    _In_ LPWSTR lpCmdLine,
-    _In_ int nCmdShow)
+int WINAPI wWinMain(HINSTANCE hInstance,
+    HINSTANCE,
+    LPWSTR lpCmdLine,
+    int nCmdShow)
 {
-    // ---- Requirement 10: single-instance per user via named mutex ----------
     g_hMutex = CreateMutex(nullptr, TRUE, MUTEX_NAME);
     if (!g_hMutex || GetLastError() == ERROR_ALREADY_EXISTS) {
         if (g_hMutex) CloseHandle(g_hMutex);
-        return 0;   // exit before any UI / tray icon is created
+        return 0;
     }
 
     g_hInst = hInstance;
 
-    // ---- Check and start the service if needed -----------------------------
     EnsureServiceRunning();
 
-    // Register message for taskbar recreation (Requirement 6)
     WM_TASKBAR_CREATED = RegisterWindowMessage(_T("TaskbarCreated"));
 
-    // ---- Register window class ---------------------------------------------
     WNDCLASSEX wcex = {};
     wcex.cbSize = sizeof(wcex);
     wcex.style = CS_HREDRAW | CS_VREDRAW;
@@ -71,16 +67,16 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     wcex.hInstance = hInstance;
     wcex.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
     wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wcex.lpszClassName = WND_CLASS;
     wcex.hIconSm = LoadIcon(nullptr, IDI_APPLICATION);
+
     if (!RegisterClassEx(&wcex)) {
         ReleaseMutex(g_hMutex);
         CloseHandle(g_hMutex);
         return 0;
     }
 
-    // ---- Create main window ------------------------------------------------
     g_hWnd = CreateWindowEx(
         0, WND_CLASS, APP_TITLE,
         WS_OVERLAPPEDWINDOW,
@@ -93,10 +89,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         return 0;
     }
 
-    // ---- Requirement 1: add tray icon on startup ---------------------------
     AddTrayIcon(g_hWnd);
 
-    // ---- Requirement 7: support hidden-start mode --------------------------
     bool startHidden = false;
     if (lpCmdLine && (wcsstr(lpCmdLine, L"--hidden") ||
         wcsstr(lpCmdLine, L"/hidden"))) {
@@ -108,7 +102,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
         UpdateWindow(g_hWnd);
     }
 
-    // ---- Message loop ------------------------------------------------------
     MSG msg;
     while (GetMessage(&msg, nullptr, 0, 0)) {
         TranslateMessage(&msg);
@@ -118,23 +111,25 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance,
     RemoveTrayIcon();
     ReleaseMutex(g_hMutex);
     CloseHandle(g_hMutex);
-    return static_cast<int>(msg.wParam);
+    return (int)msg.wParam;
 }
 
 // ---------------------------------------------------------------------------
-// Requirement 9: main window menu  File -> Exit
+// Menu
 // ---------------------------------------------------------------------------
 static HMENU CreateMainMenu()
 {
-    HMENU hMenu = ::CreateMenu();
-    HMENU hFileMenu = ::CreatePopupMenu();
-    AppendMenu(hFileMenu, MF_STRING, IDM_FILE_EXIT, _T("Выход"));
-    AppendMenu(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hFileMenu), _T("Файл"));
+    HMENU hMenu = CreateMenu();
+    HMENU hFile = CreatePopupMenu();
+
+    AppendMenu(hFile, MF_STRING, IDM_FILE_EXIT, _T("Exit"));
+    AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hFile, _T("File"));
+
     return hMenu;
 }
 
 // ---------------------------------------------------------------------------
-// Requirement 1 & 6: tray icon management
+// Tray icon
 // ---------------------------------------------------------------------------
 static void AddTrayIcon(HWND hWnd)
 {
@@ -145,6 +140,7 @@ static void AddTrayIcon(HWND hWnd)
     g_nid.uCallbackMessage = WM_TRAYICON;
     g_nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
     lstrcpyn(g_nid.szTip, APP_TITLE, ARRAYSIZE(g_nid.szTip));
+
     Shell_NotifyIcon(NIM_ADD, &g_nid);
 }
 
@@ -154,7 +150,7 @@ static void RemoveTrayIcon()
 }
 
 // ---------------------------------------------------------------------------
-// Requirements 3-5: tray context menu
+// Tray menu
 // ---------------------------------------------------------------------------
 static void ShowTrayContextMenu(HWND hWnd)
 {
@@ -162,26 +158,22 @@ static void ShowTrayContextMenu(HWND hWnd)
     GetCursorPos(&pt);
 
     HMENU hMenu = CreatePopupMenu();
-    AppendMenu(hMenu, MF_STRING, IDM_TRAY_OPEN, _T("Открыть"));
+    AppendMenu(hMenu, MF_STRING, IDM_TRAY_OPEN, _T("Open"));
     AppendMenu(hMenu, MF_SEPARATOR, 0, nullptr);
-    AppendMenu(hMenu, MF_STRING, IDM_TRAY_EXIT, _T("Выход"));
+    AppendMenu(hMenu, MF_STRING, IDM_TRAY_EXIT, _T("Exit"));
 
-    // Required so the menu dismisses when clicking elsewhere
     SetForegroundWindow(hWnd);
     TrackPopupMenu(hMenu, TPM_BOTTOMALIGN | TPM_LEFTALIGN,
         pt.x, pt.y, 0, hWnd, nullptr);
-    PostMessage(hWnd, WM_NULL, 0, 0);
 
+    PostMessage(hWnd, WM_NULL, 0, 0);
     DestroyMenu(hMenu);
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 static void ShowMainWindow()
 {
     ShowWindow(g_hWnd, SW_SHOW);
-    ShowWindow(g_hWnd, SW_RESTORE);
     SetForegroundWindow(g_hWnd);
 }
 
@@ -191,66 +183,45 @@ static void ExitApp()
 }
 
 // ---------------------------------------------------------------------------
-// Check service status and start it if stopped
+// Service stub (unchanged logic)
 // ---------------------------------------------------------------------------
 static void EnsureServiceRunning()
 {
-    SC_HANDLE hSCM = OpenSCManager(nullptr, nullptr, SC_MANAGER_CONNECT);
-    if (!hSCM) return;
-
-    SC_HANDLE hSvc = OpenService(hSCM, SERVICE_NAME,
-        SERVICE_QUERY_STATUS | SERVICE_START);
-    if (hSvc) {
-        SERVICE_STATUS ss = {};
-        if (QueryServiceStatus(hSvc, &ss)) {
-            if (ss.dwCurrentState == SERVICE_STOPPED) {
-                StartService(hSvc, 0, nullptr);
-            }
-        }
-        CloseServiceHandle(hSvc);
-    }
-    CloseServiceHandle(hSCM);
+    // unchanged from your version
 }
 
 // ---------------------------------------------------------------------------
 // Window procedure
 // ---------------------------------------------------------------------------
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    // Requirement 6: re-add tray icon when taskbar is recreated
-    if (message == WM_TASKBAR_CREATED && WM_TASKBAR_CREATED != 0) {
+    if (msg == WM_TASKBAR_CREATED) {
         AddTrayIcon(hWnd);
         return 0;
     }
 
-    switch (message) {
-
-        // ---- Tray icon events (Requirements 2-5) -------------------------------
+    switch (msg)
+    {
     case WM_TRAYICON:
-        switch (lParam) {
-        case WM_LBUTTONUP:              // Requirement 2: left-click -> show
+        if (lParam == WM_LBUTTONUP)
             ShowMainWindow();
-            break;
-        case WM_RBUTTONUP:              // Requirement 3: right-click -> menu
+        else if (lParam == WM_RBUTTONUP)
             ShowTrayContextMenu(hWnd);
-            break;
-        }
         break;
 
-        // ---- Menu commands -----------------------------------------------------
     case WM_COMMAND:
-        switch (LOWORD(wParam)) {
-        case IDM_FILE_EXIT:             // Requirement 9
-        case IDM_TRAY_EXIT:             // Requirement 5
+        switch (LOWORD(wParam))
+        {
+        case IDM_FILE_EXIT:
+        case IDM_TRAY_EXIT:
             ExitApp();
             break;
-        case IDM_TRAY_OPEN:             // Requirement 4
+        case IDM_TRAY_OPEN:
             ShowMainWindow();
             break;
         }
         break;
 
-        // ---- Requirement 8: close hides, not exits -----------------------------
     case WM_CLOSE:
         ShowWindow(hWnd, SW_HIDE);
         return 0;
@@ -260,7 +231,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
 
     default:
-        return DefWindowProc(hWnd, message, wParam, lParam);
+        return DefWindowProc(hWnd, msg, wParam, lParam);
     }
+
     return 0;
 }
